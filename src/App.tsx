@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Auth from "@/components/Auth";
 import Dashboard from "@/components/Dashboard";
 import AdminPanel from "@/components/AdminPanel";
+import { GameTester } from "@/components/GameTester";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
@@ -54,6 +55,7 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute>
             <Dashboard />
+            <GameTester /> {/* Componente de prueba añadido aquí */}
           </ProtectedRoute>
         } 
       />

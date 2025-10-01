@@ -25,6 +25,18 @@ interface Database {
           max_jugadores: number
           costo_carton: number
           pozo_total: number
+          premio_total: number
+          numeros_cantados: number[]
+          ganador_id: string | null
+        }
+      }
+      cartones_2025_09_28_19_00: {
+        Row: {
+          id: string
+          user_id: string
+          sala_id: string
+          numeros: number[]
+          es_ganador: boolean
         }
       }
       config_economica_2025_09_28_19_00: {
@@ -62,7 +74,7 @@ Deno.serve(async (req) => {
       throw new Error('Usuario no autenticado')
     }
 
-    const { action, salaId, numeroCarton } = await req.json()
+    const { action, salaId, numeroCarton, cartonId } = await req.json()
 
     switch (action) {
       case 'get_rooms':
@@ -76,6 +88,12 @@ Deno.serve(async (req) => {
       
       case 'start_game':
         return await startGame(supabaseClient, user.id, salaId)
+      
+      case 'call_number':
+        return await callNextNumber(supabaseClient, salaId)
+
+      case 'check_bingo':
+        return await checkWinner(supabaseClient, user.id, salaId, cartonId)
       
       default:
         throw new Error('Acción no válida')
@@ -263,6 +281,110 @@ async function startGame(supabaseClient: any, userId: string, salaId: string) {
     JSON.stringify({ success: true, premioTotal }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
+}
+
+async function callNextNumber(supabaseClient: any, salaId: string) {
+  const { data: sala, error: salaError } = await supabaseClient
+    .from('salas_juego_2025_09_28_19_00')
+    .select('numeros_cantados, estado')
+    .eq('id', salaId)
+    .single()
+
+  if (salaError) throw salaError
+  if (sala.estado !== 'en_juego') throw new Error('El juego no ha iniciado o ya ha terminado.')
+
+  const numerosCantados = sala.numeros_cantados || []
+  if (numerosCantados.length >= 75) {
+    // Opcional: finalizar el juego si se cantan todos los números
+    await supabaseClient.from('salas_juego_2025_09_28_19_00').update({ estado: 'terminada' }).eq('id', salaId)
+    return new Response(JSON.stringify({ message: 'Todos los números han sido cantados.' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+  }
+
+  const numerosDisponibles = Array.from({ length: 75 }, (_, i) => i + 1).filter(n => !numerosCantados.includes(n))
+  const nuevoNumero = numerosDisponibles[Math.floor(Math.random() * numerosDisponibles.length)]
+
+  const { data: updatedSala, error: updateError } = await supabaseClient
+    .from('salas_juego_2025_09_28_19_00')
+    .update({ numeros_cantados: [...numerosCantados, nuevoNumero] })
+    .eq('id', salaId)
+    .select('numeros_cantados')
+    .single()
+
+  if (updateError) throw updateError
+
+  return new Response(JSON.stringify({ success: true, nuevoNumero, numeros_cantados: updatedSala.numeros_cantados }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+}
+
+async function checkWinner(supabaseClient: any, userId: string, salaId: string, cartonId: string) {
+  // 1. Obtener datos de la sala y el cartón
+  const { data: sala } = await supabaseClient.from('salas_juego_2025_09_28_19_00').select('*').eq('id', salaId).single()
+  const { data: carton } = await supabaseClient.from('cartones_2025_09_28_19_00').select('*').eq('id', cartonId).single()
+
+  // 2. Validaciones
+  if (!sala || !carton) throw new Error('Sala o cartón no encontrado.')
+  if (sala.estado !== 'en_juego') throw new Error('El juego no está activo.')
+  if (carton.user_id !== userId) throw new Error('Este cartón no te pertenece.')
+
+  // 3. Comprobar si es un bingo válido
+  const esGanador = isBingo(carton.numeros, sala.numeros_cantados)
+
+  if (!esGanador) {
+    return new Response(JSON.stringify({ success: false, message: 'No es un bingo válido.' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+  }
+
+  // 4. Procesar al ganador
+  // Usar una transacción para asegurar la atomicidad
+  const { data: userData, error: userError } = await supabaseClient.from('users_2025_09_28_19_00').select('tokens').eq('id', userId).single()
+  if(userError) throw userError
+
+  const nuevosTokens = userData.tokens + sala.premio_total
+
+  // Actualizar usuario
+  const { error: updateUserError } = await supabaseClient.from('users_2025_09_28_19_00').update({ tokens: nuevosTokens }).eq('id', userId)
+  if(updateUserError) throw updateUserError
+
+  // Actualizar cartón
+  await supabaseClient.from('cartones_2025_09_28_19_00').update({ es_ganador: true }).eq('id', cartonId)
+
+  // Actualizar sala
+  await supabaseClient.from('salas_juego_2025_09_28_19_00').update({ 
+    estado: 'terminada', 
+    ganador_id: userId, 
+    finished_at: new Date().toISOString() 
+  }).eq('id', salaId)
+
+  return new Response(JSON.stringify({ success: true, message: `¡Felicidades, has ganado ${sala.premio_total} tokens!`, premio: sala.premio_total }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+}
+
+function isBingo(cardNumbers: number[], calledNumbers: number[]): boolean {
+  const winningPatterns = [
+    // Horizontales
+    [0, 1, 2, 3, 4],
+    [5, 6, 7, 8, 9],
+    [10, 11, 12, 13, 14],
+    [15, 16, 17, 18, 19],
+    [20, 21, 22, 23, 24],
+    // Verticales
+    [0, 5, 10, 15, 20],
+    [1, 6, 11, 16, 21],
+    [2, 7, 12, 17, 22],
+    [3, 8, 13, 18, 23],
+    [4, 9, 14, 19, 24],
+    // Diagonales
+    [0, 6, 12, 18, 24],
+    [4, 8, 12, 16, 20]
+  ];
+
+  for (const pattern of winningPatterns) {
+    const isWinner = pattern.every(index => {
+      const number = cardNumbers[index];
+      // El espacio libre (0) siempre cuenta como marcado
+      return number === 0 || calledNumbers.includes(number);
+    });
+    if (isWinner) return true;
+  }
+
+  return false;
 }
 
 function generateBingoCard(): number[] {
