@@ -1,7 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = 'https://tyiejzsvkhfbxsorxzrl.supabase.co'
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5aWVqenN2a2hmYnhzb3J4enJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkwMTk3NzQsImV4cCI6MjA3NDU5NTc3NH0._evEywZQs-qVBrOqR6b_hDTnLrSTqRLBgbCly3t7qIg'
+// Lee las variables de entorno de Vite
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+// Valida que las variables de entorno estén presentes
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error("Supabase URL and Anon Key are required.");
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
